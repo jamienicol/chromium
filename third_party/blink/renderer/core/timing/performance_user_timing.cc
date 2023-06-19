@@ -38,6 +38,15 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
+#include <sstream>
+#if BUILDFLAG(IS_WIN)
+#include <windows.h>
+#endif
+#if BUILDFLAG(IS_ANDROID)
+#include "base/android/path_utils.h"
+#endif
+
+
 namespace blink {
 
 namespace {
@@ -176,6 +185,28 @@ base::TimeTicks UserTiming::GetPerformanceMarkUnsafeTimeForTraces(
   return performance_->GetTimeOriginInternal() + base::Milliseconds(start_time);
 }
 
+static std::string GetMarkerFilename() {
+  std::stringstream s;
+#if BUILDFLAG(IS_ANDROID)
+  base::FilePath external_storage_dir;
+  base::android::GetExternalStorageDirectory(&external_storage_dir);
+  s << external_storage_dir << "/Android/data/org.chromium.chrome/files/";
+#endif
+  s << "marker-" << getpid() << ".txt";
+  __android_log_print(ANDROID_LOG_ERROR, "Chromium", "jamiedbg Marker filename: %s\n", s.str().c_str());
+  return s.str();
+}
+
+static int64_t GetFrequency() {
+#if BUILDFLAG(IS_WIN)
+  LARGE_INTEGER perf_counter_frequency = {};
+  ::QueryPerformanceFrequency(&perf_counter_frequency);
+  return perf_counter_frequency.QuadPart;
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID)
+  return base::Time::kNanosecondsPerSecond;
+#endif
+}
+
 PerformanceMeasure* UserTiming::Measure(ScriptState* script_state,
                                         const AtomicString& measure_name,
                                         const V8UnionDoubleOrString* start,
@@ -206,6 +237,22 @@ PerformanceMeasure* UserTiming::Measure(ScriptState* script_state,
                       "'end' must be unspecified";
       end_time = start_time + duration.value();
     }
+  }
+
+  {
+    static FILE *f = fopen(GetMarkerFilename().c_str(), "w+");
+
+    base::TimeTicks unsafe_start_time =
+      GetPerformanceMarkUnsafeTimeForTraces(start_time, start);
+    base::TimeTicks unsafe_end_time =
+      GetPerformanceMarkUnsafeTimeForTraces(end_time, end);
+
+    static int64_t frequency = GetFrequency();
+    fprintf(f, "%" PRIi64 " %" PRIi64 " %s\n",
+            unsafe_start_time.ToInternalValue() * (frequency / base::Time::kMicrosecondsPerSecond),
+            unsafe_end_time.ToInternalValue() * (frequency / base::Time::kMicrosecondsPerSecond),
+            measure_name.Utf8().c_str());
+    fflush(f);
   }
 
   if (IsTracingEnabled()) {
