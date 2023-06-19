@@ -29,8 +29,13 @@ final class BindService {
     private static Method sBindServiceAsUserMethod;
 
     static boolean supportVariableConnections() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                && !BuildConfig.IS_INCREMENTAL_INSTALL;
+        // After removing the android:isolatedProcess flag from the SandboxedProcessService in
+        // AndroidManifest.xml, we encounter the following crash:
+        //
+        // java.lang.IllegalArgumentException: Can't use instance name '0' with non-isolated non-sdk sandbox service 'org.chromium.content.app.SandboxedProcessService0'
+        //
+        // Returning false here avoids that crash.
+        return false;
     }
 
     // Note that handler is not guaranteed to be used, and client still need to correctly handle
